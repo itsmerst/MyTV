@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Movies — MyTV{% endblock %}
+{% block content %}
+
+<form class="toolbar" method="get">
+  <h1>Movies</h1>
+  <div class="chips">
+    {% for st in statuses %}
+      <a class="chip {{ 'on' if status==st }}"
+         href="{{ url_for('movies', status=st, q=q, sort=sort) }}">
+        {{ st|capitalize }}<span class="n">{{ counts.get(st, 0) }}</span>
+      </a>
+    {% endfor %}
+  </div>
+  <span class="spacer"></span>
+  <input type="search" name="q" value="{{ q }}" placeholder="Search movies…">
+  <select name="sort" onchange="this.form.submit()">
+    <option value="recent"  {{ 'selected' if sort=='recent' }}>Recently added</option>
+    <option value="name"    {{ 'selected' if sort=='name' }}>A–Z</option>
+    <option value="release" {{ 'selected' if sort=='release' }}>Newest release</option>
+    <option value="rated"   {{ 'selected' if sort=='rated' }}>Rated first</option>
+  </select>
+  <button class="btn ghost small">Go</button>
+</form>
+
+{% if movies %}
+<div class="grid">
+  {% for m in movies %}
+  <a class="card" href="{{ url_for('movie_detail', movie_id=m['id']) }}">
+    <div class="poster">
+      {% if img(m) %}
+        <img loading="lazy" src="{{ img(m) }}" alt="">
+      {% else %}
+        <div class="placeholder">{{ m['name'] }}</div>
+      {% endif %}
+      {% if m['rating'] is not none %}<span class="badge fav">★ rated</span>{% endif %}
+      {% if m['rewatch_count'] %}<span class="badge">×{{ m['rewatch_count'] + 1 }}</span>{% endif %}
+    </div>
+    <div class="meta">
+      <div class="name">{{ m['name'] }}</div>
+      <div class="sub">
+        {{ (m['release_date'] or '')[:4] }}
+        · <span class="status-pill st-{{ m['status'] }}">{{ m['status'] }}</span>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No movies match. Try clearing the search or a different filter.</div>
+{% endif %}
+
+{% endblock %}

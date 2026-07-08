@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Shows — MyTV{% endblock %}
+{% block content %}
+
+{% if not tmdb.has_key() %}
+<div class="notice">
+  Add a free <a href="{{ url_for('settings') }}">TMDB API key</a> to pull in posters,
+  descriptions &amp; discover new shows. Your library works fine without it too.
+</div>
+{% endif %}
+
+<form class="toolbar" method="get">
+  <h1>Shows</h1>
+  <div class="chips">
+    {% for st in statuses %}
+      <a class="chip {{ 'on' if status==st }}"
+         href="{{ url_for('library', status=st, q=q, sort=sort) }}">
+        {{ st|capitalize }}<span class="n">{{ counts.get(st, 0) }}</span>
+      </a>
+    {% endfor %}
+  </div>
+  <span class="spacer"></span>
+  <input type="search" name="q" value="{{ q }}" placeholder="Search shows…">
+  <select name="sort" onchange="this.form.submit()">
+    <option value="name"     {{ 'selected' if sort=='name' }}>A–Z</option>
+    <option value="episodes" {{ 'selected' if sort=='episodes' }}>Most watched</option>
+    <option value="score"    {{ 'selected' if sort=='score' }}>Engagement</option>
+    <option value="recent"   {{ 'selected' if sort=='recent' }}>Recently updated</option>
+  </select>
+  <button class="btn ghost small">Go</button>
+</form>
+
+{% if shows %}
+<div class="grid">
+  {% for s in shows %}
+  <a class="card" href="{{ url_for('show_detail', tvdb_id=s['tvdb_id']) }}">
+    <div class="poster">
+      {% if img(s) %}
+        <img loading="lazy" src="{{ img(s) }}" alt="">
+      {% else %}
+        <div class="placeholder">{{ s['name'] }}</div>
+      {% endif %}
+      {% if s['is_favorite'] %}<span class="badge fav">★</span>{% endif %}
+      {% if s['episodes_seen'] %}<span class="badge">{{ s['episodes_seen'] }} ep</span>{% endif %}
+    </div>
+    <div class="meta">
+      <div class="name">{{ s['name'] }}</div>
+      <div class="sub"><span class="status-pill st-{{ s['status'] }}">{{ s['status'] }}</span></div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No shows match. Try clearing the search or a different filter.</div>
+{% endif %}
+
+{% endblock %}

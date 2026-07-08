@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ movie['name'] }} — MyTV{% endblock %}
+{% block content %}
+
+<p><a class="btn ghost small" href="{{ url_for('movies') }}">← Back to movies</a></p>
+
+<div class="detail">
+  <div class="poster">
+    {% if img(movie) %}
+      <img src="{{ img(movie) }}" alt="{{ movie['name'] }}">
+    {% else %}
+      <div class="placeholder">{{ movie['name'] }}</div>
+    {% endif %}
+  </div>
+  <div class="info">
+    <h1>{{ movie['name'] }}</h1>
+    <div class="sub" style="color:var(--muted)">
+      {% if movie['release_date'] %}{{ movie['release_date'][:4] }}{% endif %}
+      {% if movie['runtime'] %} · {{ movie['runtime'] // 60 }} min{% endif %}
+      {% if movie['vote_average'] %} · TMDB {{ '%.1f'|format(movie['vote_average']) }}{% endif %}
+    </div>
+
+    <div class="controls">
+      <label class="field" style="margin:0">Status</label>
+      <select id="status-select">
+        {% for status in statuses %}
+          <option value="{{ status }}" {{ 'selected' if movie['status']==status }}>{{ status|capitalize }}</option>
+        {% endfor %}
+      </select>
+      <label class="field" style="margin:0">Your rating</label>
+      <select id="rating-select">
+        <option value="">Not rated</option>
+        {% for rating in range(1, 11) %}
+          <option value="{{ rating }}" {{ 'selected' if movie['rating']==rating }}>{{ rating }}/10</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {% if movie['overview'] %}
+      <p class="overview">{{ movie['overview'] }}</p>
+    {% else %}
+      <p class="overview">No English description or poster is available yet.
+        Check the TMDB API key under <a href="{{ url_for('settings') }}">Settings</a>.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const movieId = {{ movie['id'] }};
+  document.getElementById('status-select').addEventListener('change', function () {
+    postForm(`/api/movie/${movieId}/update`, { status: this.value })
+      .then(() => toast('Status updated'));
+  });
+  document.getElementById('rating-select').addEventListener('change', function () {
+    postForm(`/api/movie/${movieId}/update`, { rating: this.value })
+      .then(() => toast('Rating updated'));
+  });
+</script>
+{% endblock %}

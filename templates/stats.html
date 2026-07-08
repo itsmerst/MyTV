@@ -1,0 +1,46 @@
+{% extends "base.html" %} {% block title %}Stats — MyTV{% endblock %} {% block
+content %}
+
+<h1>Your stats</h1>
+
+<div class="tiles">
+  <a class="tile" href="{{ url_for('library') }}"
+    ><div class="big">{{ s['shows'] }}</div>
+    <div class="lbl">Shows tracked</div></a
+  >
+  <a class="tile" href="{{ url_for('movies') }}"
+    ><div class="big">{{ s['movies'] }}</div>
+    <div class="lbl">Movies tracked</div></a
+  >
+  <div class="tile">
+    <div class="big">{{ s['episodes_total'] }}</div>
+    <div class="lbl">Episodes watched</div>
+  </div>
+  <div class="tile">
+    <div class="big">{{ (s['movie_seconds'] // 3600) }}h</div>
+    <div class="lbl">Movie runtime logged</div>
+  </div>
+  <a class="tile" href="{{ url_for('movies', sort='rated') }}"
+    ><div class="big">{{ s['rated_movies'] }}</div>
+    <div class="lbl">Movies rated</div></a
+  >
+</div>
+
+<h2 class="section-title">Most-watched shows</h2>
+{% if top_shows %}
+<div class="grid">
+  {% for s in top_shows %}
+  <a class="card" href="{{ url_for('show_detail', tvdb_id=s['tvdb_id']) }}">
+    <div class="poster">
+      {% if img(s) %}<img loading="lazy" src="{{ img(s) }}" alt="" /> {% else %}
+      <div class="placeholder">{{ s['name'] }}</div>
+      {% endif %}
+      <span class="badge">{{ s['episodes_seen'] }} ep</span>
+    </div>
+    <div class="meta"><div class="name">{{ s['name'] }}</div></div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No shows yet.</div>
+{% endif %} {% endblock %}

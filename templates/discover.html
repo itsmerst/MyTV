@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Discover — MyTV{% endblock %}
+{% block content %}
+
+<div class="toolbar">
+  <h1>Discover</h1>
+  <span class="spacer"></span>
+  <input type="search" id="q" placeholder="Search any movie or show by name…" style="min-width:300px">
+  <button class="btn" onclick="runSearch()">Search</button>
+</div>
+
+{% if not tmdb.has_key() %}
+<div class="notice">
+  Discover needs a free TMDB API key for trending &amp; posters. Add one on the
+  <a href="{{ url_for('settings') }}">Settings</a> page (~2 minutes).
+</div>
+{% endif %}
+
+<div class="chips" id="feeds">
+  <a class="chip on" data-feed="trending_day">🔥 Trending today</a>
+  <a class="chip" data-feed="trending_week">📈 This week</a>
+  <a class="chip" data-feed="popular_movie">🎬 Popular movies</a>
+  <a class="chip" data-feed="popular_tv">📺 Popular TV</a>
+  <a class="chip" data-feed="airing_today">🗓️ Airing today</a>
+  <a class="chip" data-feed="upcoming">🍿 Upcoming</a>
+</div>
+
+<div id="results" class="grid"></div>
+<div id="hint" class="empty">Loading…</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+  const hasKey = {{ 'true' if tmdb.has_key() else 'false' }};
+  const resultsEl = document.getElementById('results');
+  const hintEl = document.getElementById('hint');
+
+  function setHint(msg) { hintEl.textContent = msg; hintEl.style.display = msg ? 'block' : 'none'; }
+
+  // ---- feed tabs ----
+  document.querySelectorAll('#feeds .chip').forEach(c => {
+    c.addEventListener('click', () => {
+      document.querySelectorAll('#feeds .chip').forEach(x => x.classList.remove('on'));
+      c.classList.add('on');
+      loadFeed(c.dataset.feed);
+    });
+  });
+
+  async function loadFeed(feed) {
+    if (!hasKey) { resultsEl.innerHTML = ''; setHint('Add a TMDB API key in Settings to see trending.'); return; }
+    setHint('Loading…'); resultsEl.innerHTML = '';
+    const r = await fetch(`/api/discover?feed=${feed}`);
+    const data = await r.json();
+    render(data.results || []);
+  }
+
+  // ---- search ----
+  document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+  async function runSearch() {
+    const q = document.getElementById('q').value.trim();
+    if (!q) return;
+    document.querySelectorAll('#feeds .chip').forEach(x => x.classList.remove('on'));
+    setHint('Searching…'); resultsEl.innerHTML = '';
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const data = await r.json();
+    render(data.results || []);
+  }
+
+  function render(items) {
+    if (!items.length) { setHint('No results.'); return; }
+    setHint('');
+    resultsEl.innerHTML = items.map(cardHtml).join('');
+  }
+
+  function cardHtml(x) {
+    const kind = x.kind || 'tv';
+    const poster = x.image_url
+      ? `<img loading="lazy" src="${x.image_url}" alt="">`
+      : `<div class="placeholder">${escapeHtml(x.name || '')}</div>`;
+    const year = (x.date || '').slice(0, 4);
+    const tag = kind === 'movie' ? '🎬' : '📺';
+    const payload = encodeURIComponent(JSON.stringify(x));
+    const overview = x.overview ? `<div class="ov">${escapeHtml(x.overview).slice(0, 140)}…</div>` : '';
+    const btn = x.in_library
+      ? `<button class="btn small ghost" disabled>✓ In library</button>`
+      : `<button class="btn small" style="width:100%" onclick="addTitle('${payload}', this)">+ Add to want</button>`;
+    return `<div class="card">
+      <div class="poster">${poster}
+        <span class="badge">${tag}${x.vote ? ' ' + x.vote.toFixed(1) : ''}</span></div>
+      <div class="meta">
+        <div class="name">${escapeHtml(x.name || '')}</div>
+        <div class="sub">${year}</div>
+        ${overview}
+        <div style="margin-top:8px">${btn}</div>
+      </div>
+    </div>`;
+  }
+
+  async function addTitle(payload, btn) {
+    const x = JSON.parse(decodeURIComponent(payload));
+    btn.disabled = true; btn.textContent = 'Adding…';
+    await postForm('/api/add', {
+      kind: x.kind || 'tv', provider_id: x.provider_id || '', tmdb_id: x.tmdb_id || '',
+      name: x.name || '', image_url: x.image_url || '', overview: x.overview || '',
+      date: x.date || '', vote: x.vote || ''
+    });
+    btn.textContent = '✓ In library'; btn.classList.add('ghost');
+    toast(`Added “${x.name}” to your want list`);
+  }
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // initial load
+  loadFeed('trending_day');
+</script>
+{% endblock %}

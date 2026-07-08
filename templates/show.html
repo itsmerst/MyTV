@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}{{ show['name'] }} — MyTV{% endblock %}
+{% block content %}
+
+<p><a class="btn ghost small" href="{{ url_for('library') }}">← Back to shows</a></p>
+
+<div class="detail">
+  <div class="poster">
+    {% if img(show) %}
+      <img src="{{ img(show) }}" alt="">
+    {% else %}
+      <div class="placeholder">{{ show['name'] }}</div>
+    {% endif %}
+  </div>
+  <div class="info">
+    <h1>{{ show['name'] }}</h1>
+    <div class="sub" style="color:var(--muted)">
+      {% if show['first_air_date'] %}{{ show['first_air_date'][:4] }} · {% endif %}
+      {{ show['episodes_seen'] }} episodes watched
+      {% if show['vote_average'] %} · TMDB {{ '%.1f'|format(show['vote_average']) }}{% endif %}
+    </div>
+
+    <div class="controls">
+      <label class="field" style="margin:0">Status</label>
+      <select id="status-select">
+        {% for st in statuses %}
+          <option value="{{ st }}" {{ 'selected' if show['status']==st }}>{{ st|capitalize }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn ghost small" id="fav-btn" data-fav="{{ show['is_favorite'] }}">
+        {{ '★ Favorited' if show['is_favorite'] else '☆ Favorite' }}
+      </button>
+    </div>
+
+    {% if show['overview'] %}
+      <p class="overview">{{ show['overview'] }}</p>
+    {% else %}
+      <p class="overview">No description yet — enrich from TMDB on the
+        <a href="{{ url_for('settings') }}">Settings</a> page.</p>
+    {% endif %}
+
+    <div class="eps">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+        <h3 style="margin:0">Episodes</h3>
+        <div id="progress-wrap" style="flex:1; min-width:160px; display:none">
+          <div class="pbar"><div id="pbar-fill" class="pbar-fill"></div></div>
+          <div id="progress-text" class="sub" style="color:var(--muted)"></div>
+        </div>
+        <button class="btn small" id="next-btn" style="display:none">▶ Mark next watched</button>
+      </div>
+      <div id="seasons" style="margin-top:12px"></div>
+      <div id="eps-hint" class="sub" style="color:var(--muted)">Loading episodes…</div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+  const tvdbId = {{ show['tvdb_id'] }};
+  let SEASONS = [];       // [{season, episodes, watched, name}]
+  const cache = {};       // season -> episodes array
+
+  const seasonsEl = document.getElementById('seasons');
+  const hintEl = document.getElementById('eps-hint');
+  const nextBtn = document.getElementById('next-btn');
+
+  loadSeasons();
+
+  async function loadSeasons() {
+    const r = await fetch(`/api/show/${tvdbId}/episodes`);
+    const data = await r.json();
+    if (!data.ok) {
+      hintEl.textContent = data.reason || 'No episode data available for this show.';
+      return;
+    }
+    SEASONS = data.seasons;
+    hintEl.style.display = 'none';
+    renderSeasons();
+    updateProgress();
+  }
+
+  function renderSeasons() {
+    seasonsEl.innerHTML = SEASONS.map(s => `
+      <div class="season" data-season="${s.season}">
+        <div class="season-head" onclick="toggleSeason(${s.season})">
+          <span class="caret">▸</span>
+          <b>${s.season === 0 ? 'Specials' : 'Season ' + s.season}</b>
+          <span class="sub" style="color:var(--muted)">${s.watched}/${s.episodes}</span>
+          <span class="spacer"></span>
+          <button class="btn ghost small" onclick="event.stopPropagation();watchSeason(${s.season})">Mark all</button>
+        </div>
+        <div class="season-body" id="sb-${s.season}" style="display:none"></div>
+      </div>`).join('');
+  }
+
+  async function loadSeason(season) {
+    if (cache[season]) return cache[season];
+    const r = await fetch(`/api/show/${tvdbId}/season/${season}`);
+    const data = await r.json();
+    cache[season] = data.ok ? data.episodes : [];
+    return cache[season];
+  }
+
+  async function toggleSeason(season) {
+    const body = document.getElementById(`sb-${season}`);
+    const head = body.previousElementSibling;
+    const caret = head.querySelector('.caret');
+    if (body.style.display === 'block') { body.style.display = 'none'; caret.textContent = '▸'; return; }
+    caret.textContent = '▾';
+    body.style.display = 'block';
+    if (!body.dataset.loaded) {
+      body.innerHTML = '<div class="sub" style="color:var(--muted);padding:8px">Loading…</div>';
+      const eps = await loadSeason(season);
+      body.innerHTML = eps.map(epRow).join('') || '<div class="sub" style="padding:8px">No episodes.</div>';
+      body.dataset.loaded = '1';
+    }
+  }
+
+  function epRow(e) {
+    const air = e.air_date ? ` · ${e.air_date}` : '';
+    return `<label class="ep-row ${e.watched ? 'seen' : ''}" data-s="${e.season}" data-n="${e.number}" data-rt="${e.runtime || 0}">
+      <input type="checkbox" ${e.watched ? 'checked' : ''} onchange="toggleEp(this)">
+      <span class="ep-no">S${String(e.season).padStart(2,'0')}E${String(e.number).padStart(2,'0')}</span>
+      <span class="ep-name">${escapeHtml(e.name || '')}<span class="sub" style="color:var(--muted)">${air}</span></span>
+    </label>`;
+  }
+
+  async function toggleEp(cb) {
+    const row = cb.closest('.ep-row');
+    const s = +row.dataset.s, n = +row.dataset.n, rt = +row.dataset.rt;
+    row.classList.toggle('seen', cb.checked);
+    // keep cache in sync
+    (cache[s] || []).forEach(e => { if (e.number === n) e.watched = cb.checked; });
+    await postForm(`/api/show/${tvdbId}/episode`, {
+      season: s, number: n, watched: cb.checked ? 1 : 0, runtime: rt });
+    bumpSeasonCount(s);
+    updateProgress();
+  }
+
+  async function watchSeason(season) {
+    const eps = await loadSeason(season);
+    const unseen = eps.filter(e => !e.watched);
+    for (const e of unseen) {
+      e.watched = true;
+      await postForm(`/api/show/${tvdbId}/episode`, {
+        season: e.season, number: e.number, watched: 1, runtime: e.runtime || 0 });
+    }
+    if (cache[season]) {
+      const body = document.getElementById(`sb-${season}`);
+      if (body.dataset.loaded) body.innerHTML = eps.map(epRow).join('');
+    }
+    bumpSeasonCount(season);
+    updateProgress();
+    toast(`Marked Season ${season} watched`);
+  }
+
+  function bumpSeasonCount(season) {
+    const eps = cache[season] || [];
+    const wc = eps.filter(e => e.watched).length;
+    const s = SEASONS.find(x => x.season === season);
+    if (s) { s.watched = wc; }
+    const head = document.querySelector(`.season[data-season="${season}"] .season-head .sub`);
+    if (head && s) head.textContent = `${wc}/${s.episodes}`;
+  }
+
+  function updateProgress() {
+    const total = SEASONS.reduce((a, s) => a + s.episodes, 0);
+    const seen = SEASONS.reduce((a, s) => a + s.watched, 0);
+    const wrap = document.getElementById('progress-wrap');
+    wrap.style.display = 'block';
+    document.getElementById('pbar-fill').style.width = total ? (100 * seen / total) + '%' : '0';
+    document.getElementById('progress-text').textContent = `${seen} / ${total} episodes watched`;
+    nextBtn.style.display = seen < total ? 'inline-block' : 'none';
+  }
+
+  nextBtn.addEventListener('click', async () => {
+    // find first season with an unwatched episode, then first unwatched in it
+    for (const s of SEASONS) {
+      if (s.watched >= s.episodes) continue;
+      const eps = await loadSeason(s.season);
+      const e = eps.find(x => !x.watched);
+      if (!e) continue;
+      e.watched = true;
+      await postForm(`/api/show/${tvdbId}/episode`, {
+        season: e.season, number: e.number, watched: 1, runtime: e.runtime || 0 });
+      const body = document.getElementById(`sb-${s.season}`);
+      if (body && body.dataset.loaded) body.innerHTML = eps.map(epRow).join('');
+      bumpSeasonCount(s.season);
+      updateProgress();
+      toast(`Watched S${e.season}E${e.number} — ${e.name || ''}`);
+      return;
+    }
+  });
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ---- status + favorite ----
+  document.getElementById('status-select').addEventListener('change', function () {
+    postForm(`/api/show/${tvdbId}/update`, { status: this.value })
+      .then(() => toast('Status updated'));
+  });
+  const favBtn = document.getElementById('fav-btn');
+  favBtn.addEventListener('click', function () {
+    const next = this.dataset.fav === '1' ? 0 : 1;
+    postForm(`/api/show/${tvdbId}/update`, { is_favorite: next }).then(() => {
+      this.dataset.fav = next;
+      this.textContent = next ? '★ Favorited' : '☆ Favorite';
+      toast(next ? 'Added to favorites' : 'Removed from favorites');
+    });
+  });
+</script>
+{% endblock %}

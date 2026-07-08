@@ -1,0 +1,189 @@
+{% extends "base.html" %} {% block title %}Dashboard — MyTV{% endblock %} {%
+macro poster_card(item, kind, badge=None, sub=None, href=None) %} {% set tag =
+href if href else '#' %}
+<a
+  class="card{{ ' nolink' if not href }}"
+  {%
+  if
+  href
+  %}href="{{ href }}"
+  {%
+  endif
+  %}
+>
+  <div class="poster">
+    {% if img(item) %}<img
+      loading="lazy"
+      src="{{ img(item) }}"
+      alt="{{ item['name'] }}"
+    />
+    {% else %}
+    <div class="placeholder">{{ item['name'] }}</div>
+    {% endif %} {% if badge %}<span class="badge">{{ badge }}</span>{% endif %}
+    <span class="badge kindtag">{{ '📺' if kind == 'tv' else '🎬' }}</span>
+  </div>
+  <div class="meta">
+    <div class="name">{{ item['name'] }}</div>
+    {% if sub %}
+    <div class="sub">{{ sub }}</div>
+    {% endif %}
+  </div>
+</a>
+{% endmacro %} {% block content %}
+
+<h1>Dashboard</h1>
+
+<div class="section">
+  <div class="row-head">
+    <h2>Continue Watching</h2>
+    <a class="seeall" href="{{ url_for('library', status='watching') }}"
+      >See all →</a
+    >
+  </div>
+  {% if continue_watching %}
+  <div class="hscroll">
+    {% for show in continue_watching %} {{ poster_card(show, 'tv',
+    badge=show['episodes_seen'] ~ ' ep', sub='S' ~ show['last_season'] ~ ' · E'
+    ~ show['last_episode'] if show['last_season'] else None,
+    href=url_for('show_detail', tvdb_id=show['tvdb_id'])) }} {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    Nothing in progress. Start a show and it shows up here.
+  </div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="row-head">
+    <h2>Want to Watch</h2>
+  </div>
+  {% if want %}
+  <div class="hscroll">
+    {% for item in want %} {% if item['kind'] == 'tv' %} {{ poster_card(item,
+    'tv', sub='Show', href=url_for('show_detail', tvdb_id=item['tvdb_id'])) }}
+    {% else %} {{ poster_card(item, 'movie', sub=(item['release_date'] or
+    '')[:4], href=url_for('movie_detail', movie_id=item['id'])) }} {% endif %} {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Your want-to-watch list is empty.</div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="row-head">
+    <h2>Calendar - This Month</h2>
+  </div>
+  <div class="hscroll" id="calendar-items">
+    {% for item in calendar %} {% if item['kind'] == 'tv' %} {% set subtitle =
+    item['date_str'] ~ ' • S' ~ '%d' % item['season'] ~ 'E' ~ '%d' %
+    item['number'] %} {{ poster_card(item, 'tv', sub=subtitle,
+    href=url_for('show_detail', tvdb_id=item['tvdb_id'])) }} {% else %} {{
+    poster_card(item, 'movie', sub=item['date_str'],
+    href=url_for('movie_detail', movie_id=item['id'])) }} {% endif %} {% endfor %}
+  </div>
+  <div class="empty" id="calendar-empty"{% if calendar %} hidden{% endif %}>
+    Loading show episodes…
+  </div>
+</div>
+
+<div class="section">
+  <div class="row-head">
+    <h2>History</h2>
+    <a class="seeall" href="{{ url_for('movies', status='watched') }}"
+      >See all →</a
+    >
+  </div>
+  {% if history %}
+  <div class="hscroll">
+    {% for item in history %} {% if item['kind'] == 'tv' %} {{ poster_card(item,
+    'tv', badge='✓', href=url_for('show_detail', tvdb_id=item['tvdb_id'])) }} {%
+    else %} {{ poster_card(item, 'movie', badge='✓', sub=(item['release_date']
+    or '')[:4], href=url_for('movie_detail', movie_id=item['id'])) }} {% endif %} {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Nothing finished yet.</div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (async function loadCalendarEpisodes() {
+    const row = document.getElementById('calendar-items');
+    const empty = document.getElementById('calendar-empty');
+    const month = new Date().toISOString().slice(0, 7);
+    const cacheKey = `mytv-calendar-${month}`;
+
+    function appendEpisodes(items) {
+      for (const item of items) {
+        const card = document.createElement('a');
+        card.className = 'card';
+        card.href = `/show/${item.tvdb_id}`;
+
+        const poster = document.createElement('div');
+        poster.className = 'poster';
+        if (item.poster_url) {
+          const image = document.createElement('img');
+          image.loading = 'lazy';
+          image.src = item.poster_url;
+          image.alt = item.title;
+          poster.appendChild(image);
+        } else {
+          const placeholder = document.createElement('div');
+          placeholder.className = 'placeholder';
+          placeholder.textContent = item.title;
+          poster.appendChild(placeholder);
+        }
+        const kind = document.createElement('span');
+        kind.className = 'badge kindtag';
+        kind.textContent = '📺';
+        poster.appendChild(kind);
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = item.title;
+        const sub = document.createElement('div');
+        sub.className = 'sub';
+        const date = new Date(`${item.date}T00:00:00`);
+        const dateText = Number.isNaN(date.valueOf())
+          ? item.date
+          : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        sub.textContent = `${dateText} • S${item.season}E${item.number}`;
+        meta.append(name, sub);
+        card.append(poster, meta);
+        row.appendChild(card);
+      }
+    }
+
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+      if (cached && Date.now() - cached.savedAt < 15 * 60 * 1000) {
+        appendEpisodes(cached.items);
+        return;
+      }
+
+      const response = await fetch('/api/dashboard/calendar?episodes_only=1');
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('Calendar request failed');
+      sessionStorage.setItem(cacheKey, JSON.stringify({
+        savedAt: Date.now(),
+        items: data.items,
+      }));
+      appendEpisodes(data.items);
+    } catch (error) {
+      console.warn('Could not load dashboard episodes', error);
+    } finally {
+      if (row.children.length) {
+        empty.hidden = true;
+      } else {
+        empty.textContent = 'No upcoming movies or episodes this month.';
+        empty.hidden = false;
+      }
+    }
+  })();
+</script>
+{% endblock %}

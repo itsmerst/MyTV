@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(rm -rf _peek)",
+      "Bash(unzip -o -q gdpr-data.zip -d _peek)",
+      "Bash(tasklist)",
+      "Bash(curl -s http://127.0.0.1:5000)",
+      "Bash(pkill -f \"python app.py\")",
+      "Bash(curl -s http://127.0.0.1:5000/dashboard)",
+      "Bash(curl -s http://127.0.0.1:5000/api/dashboard/history)",
+      "Bash(curl -s http://127.0.0.1:5000/api/show/121361/next)",
+      "Bash(pkill -9 python)"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+# Local database & raw export — your personal data, never commit
+mytv.db
+data_raw/
+config.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
