@@ -6,6 +6,7 @@ just won't get posters until you add one on the Settings page.
 
 Get a free key at: https://www.themoviedb.org/settings/api  (v3 "API Key")
 """
+import os
 import requests
 import db
 
@@ -15,8 +16,13 @@ TIMEOUT = 12
 
 
 def api_key():
-    return db.get_setting("tmdb_api_key", "").strip()
+    # 1. Use Render environment variable if available
+    key = os.environ.get("TMDB_API_KEY")
+    if key:
+        return key.strip()
 
+    # 2. Otherwise use the local database setting
+    return db.get_setting("tmdb_api_key", "").strip()
 
 def has_key():
     return bool(api_key())
