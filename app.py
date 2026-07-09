@@ -58,8 +58,41 @@ MOVIE_STATUSES = ["want", "watched"]
 # ---------------------------------------------------------------- pages -----
 
 @app.route("/")
-def home():
-    return redirect(url_for("discover"))
+def library():
+    status = request.args.get("status", "all")
+    q = (request.args.get("q") or "").strip()
+    sort = request.args.get("sort", "name")
+
+    where, params = [], []
+    if status != "all":
+        where.append("status = ?")
+        params.append(status)
+    if q:
+        where.append("name LIKE ?")
+        params.append(f"%{q}%")
+    sql = "SELECT * FROM shows"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    order = {
+        "name": "name COLLATE NOCASE ASC",
+        "episodes": "episodes_seen DESC",
+        "score": "addiction_score DESC, episodes_seen DESC",
+        "recent": "updated_at DESC",
+    }.get(sort, "name COLLATE NOCASE ASC")
+    sql += f" ORDER BY {order}"
+
+    conn = db.connect()
+    shows = conn.execute(sql, params).fetchall()
+    counts = {r["status"]: r["c"] for r in conn.execute(
+        "SELECT status, COUNT(*) c FROM shows GROUP BY status")}
+    counts["all"] = conn.execute("SELECT COUNT(*) c FROM shows").fetchone()["c"]
+    conn.close()
+
+    return render_template(
+        "library.html", shows=shows, counts=counts, status=status, q=q, sort=sort,
+        statuses=["all"] + SHOW_STATUSES, tmdb=tmdb, active="library",
+    )
+
 
 @app.route("/movies")
 def movies():
