@@ -58,40 +58,109 @@ MOVIE_STATUSES = ["want", "watched"]
 # ---------------------------------------------------------------- pages -----
 
 @app.route("/")
-def library():
-    status = request.args.get("status", "all")
-    q = (request.args.get("q") or "").strip()
-    sort = request.args.get("sort", "name")
-
-    where, params = [], []
-    if status != "all":
-        where.append("status = ?")
-        params.append(status)
-    if q:
-        where.append("name LIKE ?")
-        params.append(f"%{q}%")
-    sql = "SELECT * FROM shows"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    order = {
-        "name": "name COLLATE NOCASE ASC",
-        "episodes": "episodes_seen DESC",
-        "score": "addiction_score DESC, episodes_seen DESC",
-        "recent": "updated_at DESC",
-    }.get(sort, "name COLLATE NOCASE ASC")
-    sql += f" ORDER BY {order}"
-
+def dashboard():
+    from datetime import datetime
+    
     conn = db.connect()
-    shows = conn.execute(sql, params).fetchall()
-    counts = {r["status"]: r["c"] for r in conn.execute(
-        "SELECT status, COUNT(*) c FROM shows GROUP BY status")}
-    counts["all"] = conn.execute("SELECT COUNT(*) c FROM shows").fetchone()["c"]
+
+    # Headline tiles
+    total_shows = conn.execute("SELECT COUNT(*) c FROM shows").fetchone()["c"]
+    total_movies = conn.execute("SELECT COUNT(*) c FROM movies").fetchone()["c"]
+    total_episodes = conn.execute("SELECT COUNT(*) c FROM episodes_seen").fetchone()["c"]
+    total_runtime = conn.execute(
+        "SELECT COALESCE(SUM(runtime), 0) rt FROM movies WHERE status='watched'"
+    ).fetchone()["rt"]
+
+    # Continue watching — started but not finished (horizontal scroll row)
+    continue_watching = conn.execute("""
+        SELECT * FROM shows
+        WHERE status='watching' AND episodes_seen > 0
+        ORDER BY updated_at DESC LIMIT 20
+    """).fetchall()
+
+    # Want to watch — shows + movies you haven't started (horizontal scroll)
+    want_shows = conn.execute("""
+        SELECT *, 'tv' AS kind FROM shows WHERE status='want'
+        ORDER BY updated_at DESC LIMIT 20
+    """).fetchall()
+    want_movies = conn.execute("""
+        SELECT *, 'movie' AS kind FROM movies WHERE status='want'
+        ORDER BY updated_at DESC LIMIT 20
+    """).fetchall()
+    want = list(want_shows) + list(want_movies)
+
+    # History — everything finished (horizontal scroll)
+    history_shows = conn.execute("""
+        SELECT *, 'tv' AS kind FROM shows WHERE status='watched'
+        ORDER BY updated_at DESC LIMIT 40
+    """).fetchall()
+    history_movies = conn.execute("""
+        SELECT *, 'movie' AS kind FROM movies WHERE status='watched'
+        ORDER BY updated_at DESC LIMIT 40
+    """).fetchall()
+    history = sorted(
+        list(history_shows) + list(history_movies),
+        key=lambda r: r["updated_at"] or "", reverse=True,
+    )[:30]
+
+    # Calendar — movies + episodes this month (like want/history but filtered by date)
+    today = datetime.now()
+    month_start = f"{today.year:04d}-{today.month:02d}-01"
+    month_end = f"{today.year:04d}-{today.month:02d}-31"
+    
+    calendar_items = []
+    
+    # Movies this month
+    movies = conn.execute(
+        f"""SELECT *, 'movie' AS kind FROM movies
+           WHERE release_date BETWEEN ? AND ? ORDER BY release_date""",
+        (month_start, month_end)).fetchall()
+    
+    for m in movies:
+        m = dict(m)  # Convert sqlite3.Row to dict
+        # Format date as "Mon D"
+        try:
+            d = datetime.strptime(m['release_date'], '%Y-%m-%d')
+            m['date_str'] = d.strftime('%b %d')
+        except:
+            m['date_str'] = m['release_date'][:10]
+        calendar_items.append(m)
+    
+    # Episode dates come from TMDB. Loading them here used to block every
+    # dashboard navigation with up to 20 network requests. The browser now
+    # requests them after this local-data page has rendered.
+
+    # Recent activity feed (episodes + movies), newest first
+    recent_episodes = conn.execute("""
+        SELECT 'episode' type, show_name name, season, number, watched_at ts
+        FROM episodes_seen ORDER BY watched_at DESC LIMIT 10
+    """).fetchall()
+    recent_movies = conn.execute("""
+        SELECT 'movie' type, name, NULL season, NULL number, updated_at ts
+        FROM movies WHERE status='watched' ORDER BY updated_at DESC LIMIT 10
+    """).fetchall()
+    recent = sorted(
+        list(recent_episodes) + list(recent_movies),
+        key=lambda x: x["ts"] or "", reverse=True,
+    )[:15]
+
     conn.close()
 
     return render_template(
-        "library.html", shows=shows, counts=counts, status=status, q=q, sort=sort,
-        statuses=["all"] + SHOW_STATUSES, tmdb=tmdb, active="library",
+        "dashboard.html",
+        total_shows=total_shows,
+        total_movies=total_movies,
+        total_episodes=total_episodes,
+        total_runtime=total_runtime // 3600,  # seconds -> hours
+        continue_watching=continue_watching,
+        want=want,
+        calendar=calendar_items,
+        history=history,
+        recent=recent,
+        tmdb=tmdb,
+        active="dashboard",
     )
+
 
 
 @app.route("/movies")
@@ -230,108 +299,40 @@ def stats():
     )
 
 
-@app.route("/dashboard")
-def dashboard():
-    from datetime import datetime
-    
+@app.route("/shows")
+def library():
+    status = request.args.get("status", "all")
+    q = (request.args.get("q") or "").strip()
+    sort = request.args.get("sort", "name")
+
+    where, params = [], []
+    if status != "all":
+        where.append("status = ?")
+        params.append(status)
+    if q:
+        where.append("name LIKE ?")
+        params.append(f"%{q}%")
+    sql = "SELECT * FROM shows"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    order = {
+        "name": "name COLLATE NOCASE ASC",
+        "episodes": "episodes_seen DESC",
+        "score": "addiction_score DESC, episodes_seen DESC",
+        "recent": "updated_at DESC",
+    }.get(sort, "name COLLATE NOCASE ASC")
+    sql += f" ORDER BY {order}"
+
     conn = db.connect()
-
-    # Headline tiles
-    total_shows = conn.execute("SELECT COUNT(*) c FROM shows").fetchone()["c"]
-    total_movies = conn.execute("SELECT COUNT(*) c FROM movies").fetchone()["c"]
-    total_episodes = conn.execute("SELECT COUNT(*) c FROM episodes_seen").fetchone()["c"]
-    total_runtime = conn.execute(
-        "SELECT COALESCE(SUM(runtime), 0) rt FROM movies WHERE status='watched'"
-    ).fetchone()["rt"]
-
-    # Continue watching — started but not finished (horizontal scroll row)
-    continue_watching = conn.execute("""
-        SELECT * FROM shows
-        WHERE status='watching' AND episodes_seen > 0
-        ORDER BY updated_at DESC LIMIT 20
-    """).fetchall()
-
-    # Want to watch — shows + movies you haven't started (horizontal scroll)
-    want_shows = conn.execute("""
-        SELECT *, 'tv' AS kind FROM shows WHERE status='want'
-        ORDER BY updated_at DESC LIMIT 20
-    """).fetchall()
-    want_movies = conn.execute("""
-        SELECT *, 'movie' AS kind FROM movies WHERE status='want'
-        ORDER BY updated_at DESC LIMIT 20
-    """).fetchall()
-    want = list(want_shows) + list(want_movies)
-
-    # History — everything finished (horizontal scroll)
-    history_shows = conn.execute("""
-        SELECT *, 'tv' AS kind FROM shows WHERE status='watched'
-        ORDER BY updated_at DESC LIMIT 40
-    """).fetchall()
-    history_movies = conn.execute("""
-        SELECT *, 'movie' AS kind FROM movies WHERE status='watched'
-        ORDER BY updated_at DESC LIMIT 40
-    """).fetchall()
-    history = sorted(
-        list(history_shows) + list(history_movies),
-        key=lambda r: r["updated_at"] or "", reverse=True,
-    )[:30]
-
-    # Calendar — movies + episodes this month (like want/history but filtered by date)
-    today = datetime.now()
-    month_start = f"{today.year:04d}-{today.month:02d}-01"
-    month_end = f"{today.year:04d}-{today.month:02d}-31"
-    
-    calendar_items = []
-    
-    # Movies this month
-    movies = conn.execute(
-        f"""SELECT *, 'movie' AS kind FROM movies
-           WHERE release_date BETWEEN ? AND ? ORDER BY release_date""",
-        (month_start, month_end)).fetchall()
-    
-    for m in movies:
-        m = dict(m)  # Convert sqlite3.Row to dict
-        # Format date as "Mon D"
-        try:
-            d = datetime.strptime(m['release_date'], '%Y-%m-%d')
-            m['date_str'] = d.strftime('%b %d')
-        except:
-            m['date_str'] = m['release_date'][:10]
-        calendar_items.append(m)
-    
-    # Episode dates come from TMDB. Loading them here used to block every
-    # dashboard navigation with up to 20 network requests. The browser now
-    # requests them after this local-data page has rendered.
-
-    # Recent activity feed (episodes + movies), newest first
-    recent_episodes = conn.execute("""
-        SELECT 'episode' type, show_name name, season, number, watched_at ts
-        FROM episodes_seen ORDER BY watched_at DESC LIMIT 10
-    """).fetchall()
-    recent_movies = conn.execute("""
-        SELECT 'movie' type, name, NULL season, NULL number, updated_at ts
-        FROM movies WHERE status='watched' ORDER BY updated_at DESC LIMIT 10
-    """).fetchall()
-    recent = sorted(
-        list(recent_episodes) + list(recent_movies),
-        key=lambda x: x["ts"] or "", reverse=True,
-    )[:15]
-
+    shows = conn.execute(sql, params).fetchall()
+    counts = {r["status"]: r["c"] for r in conn.execute(
+        "SELECT status, COUNT(*) c FROM shows GROUP BY status")}
+    counts["all"] = conn.execute("SELECT COUNT(*) c FROM shows").fetchone()["c"]
     conn.close()
 
     return render_template(
-        "dashboard.html",
-        total_shows=total_shows,
-        total_movies=total_movies,
-        total_episodes=total_episodes,
-        total_runtime=total_runtime // 3600,  # seconds -> hours
-        continue_watching=continue_watching,
-        want=want,
-        calendar=calendar_items,
-        history=history,
-        recent=recent,
-        tmdb=tmdb,
-        active="dashboard",
+        "library.html", shows=shows, counts=counts, status=status, q=q, sort=sort,
+        statuses=["all"] + SHOW_STATUSES, tmdb=tmdb, active="library",
     )
 
 
